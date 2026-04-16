@@ -1,0 +1,34 @@
+name: Windows Build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build x64
+        run: msbuild WinMTR.sln /p:Configuration=Release /p:Platform=x64 /m
+
+      - name: Build x86
+        run: msbuild WinMTR.sln /p:Configuration=Release /p:Platform=Win32 /m
+
+      - name: Upload x64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WinMTR-x64
+          path: Release_x64/WinMTR.exe
+
+      - name: Upload x86 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WinMTR-x86
+          path: Release_x32/WinMTR.exe
