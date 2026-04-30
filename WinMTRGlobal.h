@@ -83,22 +83,50 @@
 #define IP_HEADER_LENGTH   20
 
 
-#define MTR_NR_COLS 9
+#define MTR_NR_COLS 16
 
-const char MTR_COLS[ MTR_NR_COLS ][10] = {
-		"Hostname",
-		"Nr",
-		"Loss %",
-		"Sent",
-		"Recv",
-		"Best",
-		"Avrg",
-		"Worst",
-		"Last"
+enum MTR_COLUMN_INDEX {
+		MTR_COL_HOSTNAME = 0,
+		MTR_COL_NR,
+		MTR_COL_LOSS,
+		MTR_COL_DROP,
+		MTR_COL_RECV,
+		MTR_COL_SENT,
+		MTR_COL_LAST,
+		MTR_COL_BEST,
+		MTR_COL_AVG,
+		MTR_COL_WORST,
+		MTR_COL_STDEV,
+		MTR_COL_GMEAN,
+		MTR_COL_JITTER,
+		MTR_COL_JAVG,
+		MTR_COL_JMAX,
+		MTR_COL_JINT
 };
 
-const int MTR_COL_LENGTH[ MTR_NR_COLS ] = {
-		190, 30, 50, 40, 40, 50, 50, 50, 50
+struct MTR_COLUMN_DEFINITION {
+	const char* listHeader;
+	const char* reportHeader;
+	int width;
+};
+
+const MTR_COLUMN_DEFINITION MTR_COLUMNS[ MTR_NR_COLS ] = {
+		{ "Hostname", "Host", 300 },
+		{ "Nr", "Nr", 30 },
+		{ "Loss %", "Loss %", 55 },
+		{ "Drop", "Drop", 50 },
+		{ "Recv", "Recv", 50 },
+		{ "Sent", "Sent", 50 },
+		{ "Last", "Last", 55 },
+		{ "Best", "Best", 55 },
+		{ "Avg", "Avg", 55 },
+		{ "Worst", "Worst", 60 },
+		{ "StDev", "StDev", 60 },
+		{ "Gmean", "Gmean", 55 },
+		{ "Jttr", "Jttr", 55 },
+		{ "Javg", "Javg", 55 },
+		{ "Jmax", "Jmax", 55 },
+		{ "Jint", "Jint", 55 }
 };
 
 int gettimeofday(struct timeval* tv, struct timezone *tz);

@@ -33,6 +33,10 @@ public:
 	enum { IDD = IDD_WINMTR_DIALOG };
 
 	afx_msg BOOL InitRegistry();
+	BOOL LoadConfigFile();
+	void SaveConfigFile();
+	CString GetConfigFilePath() const;
+	void ApplySavedColumnOrder();
 
 	WinMTRStatusBar	statusBar;
 
@@ -56,6 +60,7 @@ public:
 	};
 
 	CButton	m_buttonOptions;
+	CButton m_buttonHelp;
 	CButton	m_buttonExit;
 	CButton	m_buttonStart;
 	CComboBox m_comboHost;
@@ -65,6 +70,7 @@ public:
 	CStatic	m_staticJ;
 
 	CButton	m_buttonExpT;
+	CButton m_buttonExpC;
 	CButton	m_buttonExpH;
 	
 	int InitMTRNet();
@@ -104,6 +110,7 @@ protected:
 	afx_msg void OnPaint();
 	afx_msg void OnSize(UINT, int, int);
 	afx_msg void OnSizing(UINT, LPRECT); 
+	afx_msg void OnExitSizeMove();
 	afx_msg HCURSOR OnQueryDragIcon();
 	afx_msg void OnRestart();
 	afx_msg void OnOptions();
@@ -112,7 +119,9 @@ protected:
 	afx_msg void OnCTTC();
 	afx_msg void OnCHTC();
 	afx_msg void OnEXPT();
+	afx_msg void OnEXPC();
 	afx_msg void OnEXPH();
+	afx_msg void OnHelpMetrics();
 
 	afx_msg void OnDblclkList(NMHDR* pNMHDR, LRESULT* pResult);
 	
@@ -122,11 +131,19 @@ public:
 	afx_msg void OnCbnSelendokComboHost();
 private:
 	void ClearHistory();
+	CRect m_optionsButtonRect;
+	CRect m_helpButtonRect;
+	CRect m_exitButtonRect;
+	CRect m_exportTextButtonRect;
+	CRect m_exportCsvButtonRect;
+	CRect m_exportHtmlButtonRect;
+	CRect m_buttonsPanelRect;
 public:
 	afx_msg void OnCbnCloseupComboHost();
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	afx_msg void OnClose();
 	afx_msg void OnBnClickedCancel();
+	virtual void OnOK();
 };
 
 #endif // ifndef WINMTRDIALOG_H_
