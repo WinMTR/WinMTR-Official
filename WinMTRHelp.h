@@ -19,4 +19,8 @@ protected:
 	DECLARE_MESSAGE_MAP()
 public:
 	afx_msg void OnBnClickedOk();
+	virtual BOOL OnInitDialog();
+
+private:
+	CEdit m_helpText;
 };

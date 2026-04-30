@@ -7,6 +7,7 @@
 #include "WinMTRDialog.h"
 #include <iostream>
 #include <sstream>
+#include <float.h>
 
 #define TRACE_MSG(msg)										\
 	{														\
@@ -29,7 +30,7 @@ struct dns_resolver_thread {
 	WinMTRNet	*winmtr;
 };
 
-void TraceThread(void *p);
+unsigned __stdcall TraceThread(void *p);
 void DnsResolverThread(void *p);
 
 WinMTRNet::WinMTRNet(WinMTRDialog *wp) {
@@ -100,10 +101,18 @@ void WinMTRNet::ResetHops()
 		host[i].addr = 0;
 		host[i].xmit = 0;
 		host[i].returned = 0;
-		host[i].total = 0;
+		host[i].transit = 0;
+		host[i].total = 0.0;
 		host[i].last = 0;
 		host[i].best = 0;
 		host[i].worst = 0;
+		host[i].avg = 0.0;
+		host[i].gmean = 0.0;
+		host[i].ssd = 0.0;
+		host[i].jitter = 0.0;
+		host[i].javg = 0.0;
+		host[i].jworst = 0.0;
+		host[i].jinta = 0.0;
 		memset(host[i].name,0,sizeof(host[i].name));
 	}
 }
@@ -123,10 +132,15 @@ void WinMTRNet::DoTrace(int address)
 		current->address = address;
 		current->winmtr = this;
 		current->ttl = i + 1;
-		hThreads[i] = (HANDLE)_beginthread(TraceThread, 0 , current);
+		hThreads[i] = (HANDLE)_beginthreadex(NULL, 0, TraceThread, current, 0, NULL);
 	}
 
 	WaitForMultipleObjects(MAX_HOPS, hThreads, TRUE, INFINITE);
+	for(int i = 0; i < MAX_HOPS; i++) {
+		if(hThreads[i] != NULL) {
+			CloseHandle(hThreads[i]);
+		}
+	}
 }
 
 void WinMTRNet::StopTrace()
@@ -134,7 +148,7 @@ void WinMTRNet::StopTrace()
 	tracing = false;
 }
 
-void TraceThread(void *p)
+unsigned __stdcall TraceThread(void *p)
 {
 	trace_thread* current = (trace_thread*)p;
 	WinMTRNet *wmtrnet = current->winmtr;
@@ -165,6 +179,8 @@ void TraceThread(void *p)
 		// Check if the current thread should be closed
 		if( current->ttl > wmtrnet->GetMax() ) break;
 
+		wmtrnet->BeginProbe(current->ttl - 1);
+
 		// NOTE: some servers does not respond back everytime, if TTL expires in transit; e.g. :
 		// ping -n 20 -w 5000 -l 64 -i 7 www.chinapost.com.tw  -> less that half of the replies are coming back from 219.80.240.93
 		// but if we are pinging ping -n 20 -w 5000 -l 64 219.80.240.93  we have 0% loss
@@ -175,18 +191,13 @@ void TraceThread(void *p)
 		dwReplyCount = wmtrnet->lpfnIcmpSendEcho(wmtrnet->hICMP, current->address, achReqData, nDataLen, lpstIPInfo, achRepData, sizeof(achRepData), ECHO_REPLY_TIMEOUT);
 
 		PICMPECHO icmp_echo_reply = (PICMPECHO)achRepData;
-
-		wmtrnet->AddXmit(current->ttl - 1);
 		if (dwReplyCount != 0) {
 			TRACE_MSG("TTL " << current->ttl << " reply TTL " << icmp_echo_reply->Options.Ttl << " Status " << icmp_echo_reply->Status << " Reply count " << dwReplyCount);
 
 			switch(icmp_echo_reply->Status) {
 				case IP_SUCCESS:
 				case IP_TTL_EXPIRED_TRANSIT:
-					wmtrnet->SetLast(current->ttl - 1, icmp_echo_reply->RoundTripTime);
-					wmtrnet->SetBest(current->ttl - 1, icmp_echo_reply->RoundTripTime);
-					wmtrnet->SetWorst(current->ttl - 1, icmp_echo_reply->RoundTripTime);
-					wmtrnet->AddReturned(current->ttl - 1);
+					wmtrnet->RecordReply(current->ttl - 1, (double)icmp_echo_reply->RoundTripTime);
 					wmtrnet->SetAddr(current->ttl - 1, icmp_echo_reply->Address);
 				break;
 				case IP_BUF_TOO_SMALL:
@@ -247,8 +258,12 @@ void TraceThread(void *p)
 					wmtrnet->SetName(current->ttl - 1, "General failure.");
 			}
 
+			wmtrnet->EndProbe(current->ttl - 1);
+
 			if(wmtrnet->wmtrdlg->interval * 1000 > icmp_echo_reply->RoundTripTime)
 				Sleep(wmtrnet->wmtrdlg->interval * 1000 - icmp_echo_reply->RoundTripTime);
+		} else {
+			wmtrnet->EndProbe(current->ttl - 1);
 		}
 
     } /* end ping loop */
@@ -256,7 +271,8 @@ void TraceThread(void *p)
 	TRACE_MSG("Thread with TTL=" << current->ttl << " stopped.");
 
 	delete p;
-	_endthread();
+	_endthreadex(0);
+	return 0;
 }
 
 int WinMTRNet::GetAddr(int at)
@@ -271,7 +287,7 @@ int WinMTRNet::GetName(int at, char *n)
 {
 	WaitForSingleObject(ghMutex, INFINITE);
 	if(!strcmp(host[at].name, "")) {
-		int addr = GetAddr(at);
+		int addr = ntohl(host[at].addr);
 		sprintf (	n, "%d.%d.%d.%d", 
 							(addr >> 24) & 0xff, 
 							(addr >> 16) & 0xff, 
@@ -287,42 +303,153 @@ int WinMTRNet::GetName(int at, char *n)
 	return 0;
 }
 
-int WinMTRNet::GetBest(int at)
+int WinMTRNet::GetIp(int at, char *n, int size)
 {
 	WaitForSingleObject(ghMutex, INFINITE);
-	int ret = host[at].best;
+	int addr = ntohl(host[at].addr);
+	if(addr == 0) {
+		if(size > 0) {
+			n[0] = '\0';
+		}
+	} else {
+		_snprintf(n, size, "%d.%d.%d.%d",
+			(addr >> 24) & 0xff,
+			(addr >> 16) & 0xff,
+			(addr >> 8) & 0xff,
+			addr & 0xff);
+		n[size - 1] = '\0';
+	}
+	ReleaseMutex(ghMutex);
+	return 0;
+}
+
+int WinMTRNet::GetDisplayName(int at, char *n, int size)
+{
+	char name[255];
+	char ip[32];
+
+	GetName(at, name);
+	GetIp(at, ip, sizeof(ip));
+
+	if(strcmp(name, "") == 0) {
+		if(strcmp(ip, "") == 0) {
+			if(size > 0) {
+				n[0] = '\0';
+			}
+		} else {
+			_snprintf(n, size, "%s", ip);
+			n[size - 1] = '\0';
+		}
+		return 0;
+	}
+
+	if(strcmp(ip, "") == 0 || strcmp(name, ip) == 0) {
+		_snprintf(n, size, "%s", name);
+		n[size - 1] = '\0';
+		return 0;
+	}
+
+	_snprintf(n, size, "%s - %s", ip, name);
+	n[size - 1] = '\0';
+	return 0;
+}
+
+double WinMTRNet::GetBest(int at)
+{
+	WaitForSingleObject(ghMutex, INFINITE);
+	double ret = host[at].best;
 	ReleaseMutex(ghMutex);
 	return ret;
 }
 
-int WinMTRNet::GetWorst(int at)
+double WinMTRNet::GetWorst(int at)
 {
 	WaitForSingleObject(ghMutex, INFINITE);
-	int ret = host[at].worst;
+	double ret = host[at].worst;
 	ReleaseMutex(ghMutex);
 	return ret;
 }
 
-int WinMTRNet::GetAvg(int at)
+double WinMTRNet::GetAvg(int at)
 {
 	WaitForSingleObject(ghMutex, INFINITE);
-	int ret = host[at].returned == 0 ? 0 : host[at].total / host[at].returned;
+	double ret = host[at].returned == 0 ? 0.0 : host[at].avg;
 	ReleaseMutex(ghMutex);
 	return ret;
 }
 
-int WinMTRNet::GetPercent(int at)
+double WinMTRNet::GetLoss(int at)
 {
 	WaitForSingleObject(ghMutex, INFINITE);
-	int ret = (host[at].xmit == 0) ? 0 : (100 - (100 * host[at].returned / host[at].xmit));
+	int completed = host[at].xmit - host[at].transit;
+	double ret = (completed <= 0) ? 0.0 : (100.0 - (100.0 * host[at].returned / completed));
+	if(ret < 0.0) ret = 0.0;
 	ReleaseMutex(ghMutex);
 	return ret;
 }
 
-int WinMTRNet::GetLast(int at)
+int WinMTRNet::GetDrop(int at)
 {
 	WaitForSingleObject(ghMutex, INFINITE);
-	int ret = host[at].last;
+	int completed = host[at].xmit - host[at].transit;
+	int ret = completed - host[at].returned;
+	if(ret < 0) ret = 0;
+	ReleaseMutex(ghMutex);
+	return ret;
+}
+
+double WinMTRNet::GetLast(int at)
+{
+	WaitForSingleObject(ghMutex, INFINITE);
+	double ret = host[at].last;
+	ReleaseMutex(ghMutex);
+	return ret;
+}
+
+double WinMTRNet::GetStDev(int at)
+{
+	WaitForSingleObject(ghMutex, INFINITE);
+	double ret = (host[at].returned > 1) ? sqrt(host[at].ssd / (host[at].returned - 1.0)) : 0.0;
+	ReleaseMutex(ghMutex);
+	return ret;
+}
+
+double WinMTRNet::GetGmean(int at)
+{
+	WaitForSingleObject(ghMutex, INFINITE);
+	double ret = host[at].gmean;
+	ReleaseMutex(ghMutex);
+	return ret;
+}
+
+double WinMTRNet::GetJitter(int at)
+{
+	WaitForSingleObject(ghMutex, INFINITE);
+	double ret = host[at].jitter;
+	ReleaseMutex(ghMutex);
+	return ret;
+}
+
+double WinMTRNet::GetJavg(int at)
+{
+	WaitForSingleObject(ghMutex, INFINITE);
+	double ret = host[at].javg;
+	ReleaseMutex(ghMutex);
+	return ret;
+}
+
+double WinMTRNet::GetJworst(int at)
+{
+	WaitForSingleObject(ghMutex, INFINITE);
+	double ret = host[at].jworst;
+	ReleaseMutex(ghMutex);
+	return ret;
+}
+
+double WinMTRNet::GetJinta(int at)
+{
+	WaitForSingleObject(ghMutex, INFINITE);
+	double ret = host[at].jinta;
 	ReleaseMutex(ghMutex);
 	return ret;
 }
@@ -387,44 +514,68 @@ void WinMTRNet::SetName(int at, char *n)
 	ReleaseMutex(ghMutex);
 }
 
-void WinMTRNet::SetBest(int at, int current)
-{
-	WaitForSingleObject(ghMutex, INFINITE);
-	if(host[at].best > current || host[at].xmit == 1) {
-		host[at].best = current;
-	};
-	if(host[at].worst < current) {
-		host[at].worst = current;
-	}
-
-	ReleaseMutex(ghMutex);
-}
-
-void WinMTRNet::SetWorst(int at, int current)
-{
-	WaitForSingleObject(ghMutex, INFINITE);
-	ReleaseMutex(ghMutex);
-}
-
-void WinMTRNet::SetLast(int at, int last)
-{
-	WaitForSingleObject(ghMutex, INFINITE);
-	host[at].last = last;
-	host[at].total += last;
-	ReleaseMutex(ghMutex);
-}
-
-void WinMTRNet::AddReturned(int at)
-{
-	WaitForSingleObject(ghMutex, INFINITE);
-	host[at].returned++;
-	ReleaseMutex(ghMutex);
-}
-
-void WinMTRNet::AddXmit(int at)
+void WinMTRNet::BeginProbe(int at)
 {
 	WaitForSingleObject(ghMutex, INFINITE);
 	host[at].xmit++;
+	host[at].transit++;
+	ReleaseMutex(ghMutex);
+}
+
+void WinMTRNet::RecordReply(int at, double current)
+{
+	WaitForSingleObject(ghMutex, INFINITE);
+	double previous_last = host[at].last;
+	double previous_avg = host[at].avg;
+	double previous_javg = host[at].javg;
+
+	host[at].last = current;
+	host[at].total += current;
+
+	host[at].jitter = fabs(current - previous_last);
+
+	if(host[at].returned < 1) {
+		host[at].best = current;
+		host[at].worst = current;
+		host[at].avg = 0.0;
+		host[at].ssd = 0.0;
+		host[at].gmean = current;
+		host[at].jitter = 0.0;
+		host[at].javg = 0.0;
+		host[at].jworst = 0.0;
+		host[at].jinta = 0.0;
+	}
+
+	if(current < host[at].best || host[at].returned == 0) {
+		host[at].best = current;
+	}
+	if(current > host[at].worst) {
+		host[at].worst = current;
+	}
+	if(host[at].jitter > host[at].jworst) {
+		host[at].jworst = host[at].jitter;
+	}
+
+	host[at].returned++;
+	host[at].avg += (current - previous_avg) / host[at].returned;
+	host[at].ssd += (current - previous_avg) * (current - host[at].avg);
+	host[at].javg += (host[at].jitter - previous_javg) / host[at].returned;
+	host[at].jinta += host[at].jitter - floor((host[at].jinta + 8.0) / 16.0);
+
+	if(host[at].returned > 1) {
+		host[at].gmean =
+			pow(host[at].gmean, (host[at].returned - 1.0) / host[at].returned) *
+			pow(current, 1.0 / host[at].returned);
+	}
+	ReleaseMutex(ghMutex);
+}
+
+void WinMTRNet::EndProbe(int at)
+{
+	WaitForSingleObject(ghMutex, INFINITE);
+	if(host[at].transit > 0) {
+		host[at].transit--;
+	}
 	ReleaseMutex(ghMutex);
 }
 

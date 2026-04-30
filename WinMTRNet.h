@@ -30,10 +30,18 @@ struct s_nethost {
   __int32 addr;		// IP as a decimal, big endian
   int xmit;			// number of PING packets sent
   int returned;		// number of ICMP echo replies received
-  unsigned long total;	// total time
-  int last;				// last time
-  int best;				// best time
-  int worst;			// worst time
+  int transit;         // number of probes still in flight
+  double total;        // total time
+  double last;			// last time
+  double best;			// best time
+  double worst;		// worst time
+  double avg;          // running average
+  double gmean;        // geometric mean
+  double ssd;          // sum of squares of differences
+  double jitter;       // current jitter
+  double javg;         // average jitter
+  double jworst;       // maximum jitter
+  double jinta;        // interarrival jitter
   char name[255];
 };
 
@@ -57,23 +65,30 @@ public:
 	void	StopTrace();
 
 	int		GetAddr(int at);
+	int		GetIp(int at, char *n, int size);
 	int		GetName(int at, char *n);
-	int		GetBest(int at);
-	int		GetWorst(int at);
-	int		GetAvg(int at);
-	int		GetPercent(int at);
-	int		GetLast(int at);
+	int		GetDisplayName(int at, char *n, int size);
+	double	GetBest(int at);
+	double	GetWorst(int at);
+	double	GetAvg(int at);
+	double	GetLoss(int at);
+	int		GetDrop(int at);
+	double	GetLast(int at);
+	double	GetStDev(int at);
+	double	GetGmean(int at);
+	double	GetJitter(int at);
+	double	GetJavg(int at);
+	double	GetJworst(int at);
+	double	GetJinta(int at);
 	int		GetReturned(int at);
 	int		GetXmit(int at);
 	int		GetMax();
 
 	void	SetAddr(int at, __int32 addr);
 	void	SetName(int at, char *n);
-	void	SetBest(int at, int current);
-	void	SetWorst(int at, int current);
-	void	SetLast(int at, int last);
-	void	AddReturned(int at);
-	void	AddXmit(int at);
+	void	BeginProbe(int at);
+	void	RecordReply(int at, double current);
+	void	EndProbe(int at);
 
 	WinMTRDialog		*wmtrdlg;
 	__int32				last_remote_addr;

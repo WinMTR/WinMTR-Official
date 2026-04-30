@@ -24,6 +24,8 @@
 #define ID_EXPT                         1006
 #define ID_EXPH                         1007
 #define ID_LICENSE                      1008
+#define ID_HELP_METRICS                 1009
+#define ID_EXPC                         1010
 #define IDC_EDIT_LICENSE                1011
 #define IDC_EDIT_PHOST                  1012
 #define IDC_EDIT_PIP                    1013
@@ -40,6 +42,7 @@
 #define IDC_COMBO_HOST                  1024
 #define IDC_EDIT_MAX_LRU                1025
 #define IDC_MFCLINK1                    1026
+#define IDC_EDIT_HELPTEXT               1027
 
 // Next default values for new objects
 // 
